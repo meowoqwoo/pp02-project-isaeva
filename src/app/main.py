@@ -42,6 +42,14 @@ def calculate_discount_price(price, has_orders):
     multiplier = Decimal(100 - DISCOUNT_PERCENT) / Decimal(100)
     return (price * multiplier).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
+def validate_login(raw):
+    login = raw.strip()
+    if not login:
+        return None, "Введите логин (пробелы не считаются)"
+    if len(login) < 3:
+        return None, "Логин должен содержать минимум 3 символа"
+    return login, None
+
 class Database:
     def __init__(self):
         self.connection_pool = None
@@ -779,20 +787,20 @@ class LoginWindow(QWidget):
         self.setLayout(l)
 
     def check(self):
-        login_text = self.login_in.text().strip()
+        login, error = validate_login(self.login_in.text())
         
-        if not login_text:
-            QMessageBox.critical(self, "Ошибка", "Введите логин")
+        if error:
+            QMessageBox.critical(self, "Ошибка", error)
             return
 
-        user = self.db.check_login(login_text)
-
+        user = self.db.check_login(login)
+        
         if not user: 
             QMessageBox.critical(self, "Ошибка", "Пользователь не найден")
             return
         
         full_fio = f"{user[2]} {user[3]} {user[4] if user[4] else ''}".strip()
-
+        
         QMessageBox.information(self, "Информация", f"Добро пожаловать, {full_fio}!")
         
         self.mw = MainWindow(self.db, user[1], full_fio, self, user[0], user[5])
