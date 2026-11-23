@@ -294,32 +294,88 @@ class ProductCard(QWidget):
     def __init__(self, p_data, db, cart):
         super().__init__()
         self.p, self.db, self.cart = p_data, db, cart
-        self.setStyleSheet("background-color: #ff8080; border-radius: 5px; margin: 2px;" if self.p['total_quantity'] <= 3 else "background-color: #FFFFFF; border: 1px solid #ccc; border-radius: 5px; margin: 2px;")
-        
+
+        self.setFixedHeight(100)
+
+        # Исходные цвета карточки
+        self.setStyleSheet(
+            "background-color: #ff8080; border-radius: 5px; margin: 2px;"
+            if self.p['total_quantity'] <= 3
+            else "background-color: #FFFFFF; border: 1px solid #ccc; "
+                 "border-radius: 5px; margin: 2px;"
+        )
+
         layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 5, 5, 5)
+        layout.setSpacing(10)
+
+        # Изображение товара
         img_lbl = QLabel()
-        img_path = os.path.join(RES_DIR, self.p['image_path'] if self.p['image_path'] else "picture.png")
-        if not os.path.exists(img_path): img_path = os.path.join(RES_DIR, "picture.png")
-        img_lbl.setPixmap(QPixmap(img_path).scaled(100, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        img_lbl.setFixedSize(100, 100)
+        img_lbl.setFixedSize(65, 80)
+        img_lbl.setAlignment(Qt.AlignCenter)
+
+        img_path = os.path.join(
+            RES_DIR,
+            self.p['image_path'] if self.p['image_path'] else "picture.png"
+        )
+
+        if not os.path.exists(img_path):
+            img_path = os.path.join(RES_DIR, "picture.png")
+
+        pixmap = QPixmap(img_path)
+        if not pixmap.isNull():
+            img_lbl.setPixmap(
+                pixmap.scaled(
+                    65, 80,
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation
+                )
+            )
+
         layout.addWidget(img_lbl)
 
+        # Информация о товаре
         text = QVBoxLayout()
-        text.addWidget(QLabel(f"<b>{self.p['manufacturer']} | {self.p['name']}</b>"))
-        text.addWidget(QLabel(f"В наличии: {self.p['total_quantity']} упак."))
+        text.setSpacing(2)
+
+        name_lbl = QLabel(f"<b>{self.p['manufacturer']} | {self.p['name']}</b>")
+        text.addWidget(name_lbl)
+
+        text.addWidget(QLabel(f"Категория: {self.p['category']}"))
+        text.addWidget(QLabel(f"Доступно к заказу: {self.p['total_quantity']}"))
+        text.addWidget(QLabel(f"Всего шт.: {self.p['total_quantity']}"))
+
         layout.addLayout(text)
         layout.addStretch()
 
+        # Цена и кнопка справа
         right = QVBoxLayout()
-        if self.p['has_discount']:
-            right.addWidget(QLabel(f"<span style='color:red; text-decoration:line-through;'>{self.p['base_price']:.2f} ₽</span>"))
-            right.addWidget(QLabel(f"<b style='color:green;'>{self.p['final_price']:.2f} ₽</b>"))
-        else:
-            right.addWidget(QLabel(f"<b>от {self.p['base_price']:.2f} ₽</b>"))
+        right.setSpacing(5)
 
-        btn = QPushButton("Подробнее")
-        btn.clicked.connect(lambda: ProductDetailDialog(self.p, self.db, self.cart, self).exec())
+        price_lbl = QLabel()
+        price_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        if self.p['has_discount']:
+            price_lbl.setText(
+                f"<span style='color:red; text-decoration:line-through;'>"
+                f"{self.p['base_price']:.2f} ₽</span><br>"
+                f"<b style='color:green;'>{self.p['final_price']:.2f} ₽</b>"
+            )
+        else:
+            price_lbl.setText(f"<b>от {self.p['base_price']:.2f} ₽</b>")
+
+        right.addWidget(price_lbl)
+
+        btn = QPushButton("Выбрать ")
+        btn.clicked.connect(
+            lambda: ProductDetailDialog(
+                self.p, self.db, self.cart, self
+            ).exec()
+        )
+
         right.addWidget(btn)
+        right.addStretch()
+
         layout.addLayout(right)
 
 class CartDialog(QDialog):
