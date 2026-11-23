@@ -779,14 +779,25 @@ class LoginWindow(QWidget):
         self.setLayout(l)
 
     def check(self):
-        user = self.db.check_login(self.login_in.text().strip())
+        login_text = self.login_in.text().strip()
+        
+        if not login_text:
+            QMessageBox.critical(self, "Ошибка", "Введите логин")
+            return
+
+        user = self.db.check_login(login_text)
+
         if not user: 
-            QMessageBox.warning(self, "Ошибка", "Неверный логин")
+            QMessageBox.critical(self, "Ошибка", "Пользователь не найден")
             return
         
         full_fio = f"{user[2]} {user[3]} {user[4] if user[4] else ''}".strip()
+
+        QMessageBox.information(self, "Информация", f"Добро пожаловать, {full_fio}!")
+        
         self.mw = MainWindow(self.db, user[1], full_fio, self, user[0], user[5])
-        self.mw.show(); self.close()
+        self.mw.show()
+        self.close()
 
     def guest(self):
         self.mw = MainWindow(self.db, None, "Гость", self, None, "Гость"); self.mw.show(); self.close()
