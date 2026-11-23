@@ -2,7 +2,7 @@ import sys
 import os
 import psycopg2
 from psycopg2 import pool
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
+from PySide6.QtWidgets import (QApplication, QStackedWidget, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                                QLabel, QLineEdit, QComboBox, QPushButton, QScrollArea, 
                                QMessageBox, QDialog, QTableWidget, QTableWidgetItem, QHeaderView, QSpinBox)
 from PySide6.QtGui import QPixmap, QIcon
@@ -291,16 +291,19 @@ class ProductDetailDialog(QDialog):
         self.accept()
 
 class ProductCard(QWidget):
-    def __init__(self, p_data, db, cart):
+    def __init__(self, p_data, db, cart, main_window=None):
         super().__init__()
         self.p, self.db, self.cart = p_data, db, cart
+        self.main_window = main_window
 
         self.setFixedHeight(100)
 
-        # Исходные цвета карточки
+        total_qty = self.p.get('total_quantity') or 0
+
+
         self.setStyleSheet(
             "background-color: #ff8080; border-radius: 5px; margin: 2px;"
-            if self.p['total_quantity'] <= 3
+            if total_qty <= 3
             else "background-color: #FFFFFF; border: 1px solid #ccc; "
                  "border-radius: 5px; margin: 2px;"
         )
@@ -309,7 +312,7 @@ class ProductCard(QWidget):
         layout.setContentsMargins(8, 5, 5, 5)
         layout.setSpacing(10)
 
-        # Изображение товара
+
         img_lbl = QLabel()
         img_lbl.setFixedSize(65, 80)
         img_lbl.setAlignment(Qt.AlignCenter)
@@ -325,16 +328,12 @@ class ProductCard(QWidget):
         pixmap = QPixmap(img_path)
         if not pixmap.isNull():
             img_lbl.setPixmap(
-                pixmap.scaled(
-                    65, 80,
-                    Qt.KeepAspectRatio,
-                    Qt.SmoothTransformation
-                )
+                pixmap.scaled(65, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             )
 
         layout.addWidget(img_lbl)
 
-        # Информация о товаре
+
         text = QVBoxLayout()
         text.setSpacing(2)
 
@@ -342,13 +341,13 @@ class ProductCard(QWidget):
         text.addWidget(name_lbl)
 
         text.addWidget(QLabel(f"Категория: {self.p['category']}"))
-        text.addWidget(QLabel(f"Доступно к заказу: {self.p['total_quantity']}"))
-        text.addWidget(QLabel(f"Всего шт.: {self.p['total_quantity']}"))
+        text.addWidget(QLabel(f"Доступно к заказу: {total_qty}"))
+        text.addWidget(QLabel(f"Всего шт.: {total_qty}"))
 
         layout.addLayout(text)
         layout.addStretch()
 
-        # Цена и кнопка справа
+
         right = QVBoxLayout()
         right.setSpacing(5)
 
@@ -367,16 +366,19 @@ class ProductCard(QWidget):
         right.addWidget(price_lbl)
 
         btn = QPushButton("Выбрать ")
-        btn.clicked.connect(
-            lambda: ProductDetailDialog(
-                self.p, self.db, self.cart, self
-            ).exec()
-        )
+
+        btn.clicked.connect(self.open_detail)
 
         right.addWidget(btn)
         right.addStretch()
 
         layout.addLayout(right)
+
+    def open_detail(self):
+        if self.main_window:
+            self.main_window.show_product_page(self.p)
+        else:
+            ProductDetailDialog(self.p, self.db, self.cart, self).exec()
 
 class CartDialog(QDialog):
     def __init__(self, cart, db, user_id, parent=None):
@@ -501,72 +503,262 @@ class OrdersDialog(QDialog):
                 self.load_orders()
 
 class MainWindow(QMainWindow):
-    def __init__(self, db, role_id=None, full_name="Гость", login_window=None, user_id=None, role_name=""):
+    def __init__(self, db, role_id=None, full_name="Гость",
+                 login_window=None, user_id=None, role_name=""):
         super().__init__()
         self.db, self.role_id, self.user_id = db, role_id, user_id
         self.full_name, self.login_window, self.cart = full_name, login_window, []
         self.role_name = role_name
-        
-        self.setWindowTitle("Мир чая — Каталог"); self.resize(1000, 800)
+
+        self.setWindowTitle("Мир чая — Каталог")
+        self.resize(1000, 800)
         self.setWindowIcon(QIcon(os.path.join(RES_DIR, "icon.ico")))
 
-        central = QWidget(); self.setCentralWidget(central)
+        central = QWidget()
+        self.setCentralWidget(central)
         main_l = QVBoxLayout(central)
 
-        header = QWidget(); header.setStyleSheet("background-color: #D2F6E7;")
+
+        header = QWidget()
+        header.setStyleSheet("background-color: #D2F6E7;")
         h_l = QHBoxLayout(header)
-        logo = QLabel(); logo.setPixmap(QPixmap(os.path.join(RES_DIR, "logo.png")).scaledToHeight(50))
-        h_l.addWidget(logo); h_l.addStretch()
+        logo = QLabel()
+        logo.setPixmap(QPixmap(os.path.join(RES_DIR, "logo.png")).scaledToHeight(50))
+        h_l.addWidget(logo)
+        h_l.addStretch()
         h_l.addWidget(QLabel(f"<b>ФИО: {self.full_name}</b>"))
-        
+
+
+        self.stacked = QStackedWidget()
+
+
+        self.catalog_page = QWidget()
+        catalog_layout = QVBoxLayout(self.catalog_page)
+
+        filt = QHBoxLayout()
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Поиск по названию...")
+        filt.addWidget(self.search)
+
+        self.cat = QComboBox()
+        self.cat.addItem("Все категории")
+        self.cat.addItems(self.db.get_categories())
+        filt.addWidget(self.cat)
+
+        self.sort_combo = QComboBox()
+        self.sort_combo.addItems([
+            "По возрастанию цены", "По убыванию цены", "По алфавиту (А-Я)"
+        ])
+        filt.addWidget(self.sort_combo)
+        catalog_layout.addLayout(filt)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll_w = QWidget()
+        self.scroll_l = QVBoxLayout(self.scroll_w)
+        self.scroll.setWidget(self.scroll_w)
+        catalog_layout.addWidget(self.scroll)
+        self.stacked.addWidget(self.catalog_page) 
+
+
+        self.search.textChanged.connect(self.load_products)
+        self.cat.currentIndexChanged.connect(self.load_products)
+        self.sort_combo.currentIndexChanged.connect(self.load_products)
+
+
+        self.product_page = QWidget()
+        product_layout = QVBoxLayout(self.product_page)
+
+        self.product_container = QVBoxLayout()
+        product_layout.addLayout(self.product_container)
+        product_layout.addStretch()
+
+        back_from_product = QPushButton("← Назад в каталог")
+        back_from_product.setStyleSheet("background-color: #D2F6E7; color: black;")
+        back_from_product.clicked.connect(lambda: self.switch_page(0))
+        product_layout.addWidget(back_from_product)
+        self.stacked.addWidget(self.product_page) 
+
+
+        self.orders_page = QWidget()
+        orders_layout = QVBoxLayout(self.orders_page)
+
+        self.orders_table = QTableWidget()
+        self.orders_table.setColumnCount(4)
+        self.orders_table.setHorizontalHeaderLabels(["№", "Дата", "Клиент", "Сумма"])
+        self.orders_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.orders_table.setSelectionBehavior(QTableWidget.SelectRows)
+        orders_layout.addWidget(self.orders_table)
+
+        orders_btn_layout = QHBoxLayout()
+
+        view_btn = QPushButton("Просмотр состава")
+        view_btn.clicked.connect(self.view_order_details)  
+        orders_btn_layout.addWidget(view_btn)
+
+        if self.role_id in [1, 2]:
+            del_btn = QPushButton("Удалить заказ")
+            del_btn.setStyleSheet("background-color: #ff8080; color: black;")
+            del_btn.clicked.connect(self.delete_selected_order)  
+            orders_btn_layout.addWidget(del_btn)
+
+        orders_btn_layout.addStretch()
+        back_from_orders = QPushButton("← Назад в каталог")
+        back_from_orders.setStyleSheet("background-color: #D2F6E7; color: black;")
+        back_from_orders.clicked.connect(lambda: self.switch_page(0))
+        orders_btn_layout.addWidget(back_from_orders)
+        orders_layout.addLayout(orders_btn_layout)
+        self.stacked.addWidget(self.orders_page)  
+
+        self.stacked.setCurrentIndex(0)
+
+
         if self.role_name in ["Администратор", "Менеджер"]:
             b_orders = QPushButton("Заказы")
             b_orders.setStyleSheet("background-color: #70B2AF; color: black;")
-            b_orders.clicked.connect(lambda: OrdersDialog(self.db, self.role_id, self.user_id, self).exec())
+            b_orders.clicked.connect(self.show_orders_page)
             h_l.addWidget(b_orders)
-        
+
         if self.role_name == "Авторизованный пользователь" or self.role_id is None:
             b_cart = QPushButton("Корзина")
             b_cart.setStyleSheet("background-color: #70B2AF; color: black;")
-            b_cart.clicked.connect(lambda: CartDialog(self.cart, self.db, self.user_id, self).exec())
+            b_cart.clicked.connect(
+                lambda: CartDialog(self.cart, self.db, self.user_id, self).exec()
+            )
             h_l.addWidget(b_cart)
-            
+
         b_logout = QPushButton("Выход")
         b_logout.setStyleSheet("background-color: #70B2AF; color: black;")
-        b_logout.clicked.connect(self.logout); h_l.addWidget(b_logout)
+        b_logout.clicked.connect(self.logout)
+        h_l.addWidget(b_logout)
+
+        self.back_button = QPushButton("Назад")
+        self.back_button.setStyleSheet("background-color: #70B2AF; color: black;")
+        self.back_button.clicked.connect(self.go_back)
+        self.back_button.setVisible(False)   
+        h_l.addWidget(self.back_button)
+
         main_l.addWidget(header)
 
-        filt = QHBoxLayout()
-        self.search = QLineEdit(); self.search.setPlaceholderText("Поиск по названию..."); self.search.textChanged.connect(self.load_products)
-        filt.addWidget(self.search)
-        
-        self.cat = QComboBox(); self.cat.addItem("Все категории"); self.cat.addItems(self.db.get_categories()); self.cat.currentIndexChanged.connect(self.load_products)
-        filt.addWidget(self.cat)
-        
-        self.sort_combo = QComboBox()
-        self.sort_combo.addItems(["По возрастанию цены", "По убыванию цены", "По алфавиту (А-Я)"])
-        self.sort_combo.currentIndexChanged.connect(self.load_products)
-        filt.addWidget(self.sort_combo)
-        
-        main_l.addLayout(filt)
+        main_l.addWidget(self.stacked)
 
-        self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True)
-        self.scroll_w = QWidget(); self.scroll_l = QVBoxLayout(self.scroll_w)
-        self.scroll.setWidget(self.scroll_w); main_l.addWidget(self.scroll)
         self.load_products()
 
     def load_products(self):
-        products = self.db.get_products(self.search.text(), self.cat.currentText(), self.sort_combo.currentText())
-        for i in reversed(range(self.scroll_l.count())): 
-            w = self.scroll_l.itemAt(i).widget()
-            if w: w.setParent(None)
-        for p in products: self.scroll_l.addWidget(ProductCard(p, self.db, self.cart))
+        if not hasattr(self, "scroll_l"):
+            return
+        try:
+            products = self.db.get_products(
+                self.search.text(),
+                self.cat.currentText(),
+                self.sort_combo.currentText()
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка загрузки товаров", str(e))
+            products = []
+
+        # очистка layout
+        while self.scroll_l.count():
+            item = self.scroll_l.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+
+        for p in products:
+            self.scroll_l.addWidget(ProductCard(p, self.db, self.cart, self))
+
         self.scroll_l.addStretch()
+
+
+    def show_product_page(self, product_data):
+        while self.product_container.count():
+            item = self.product_container.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+
+        card = ProductCard(product_data, self.db, self.cart, self)
+        card.setFixedHeight(120)
+        self.product_container.addWidget(card)
+
+        info = QLabel(
+            f"<h2>{product_data['manufacturer']} | {product_data['name']}</h2>"
+            f"<p><i>{product_data['description']}</i></p>"
+            f"<p><b>Состав:</b> {product_data['composition']}</p>"
+            f"<p><b>Категория:</b> {product_data['category']}</p>"
+            f"<p><b>В наличии:</b> {product_data['total_quantity']} шт.</p>"
+        )
+        info.setWordWrap(True)
+        self.product_container.addWidget(info)
+
+        self.switch_page(1)
+
+    def show_orders_page(self):
+        self.load_orders()
+        self.switch_page(2)
+
+    def load_orders(self):
+        try:
+            orders = self.db.get_orders(self.role_id, self.user_id)
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка загрузки заказов", str(e))
+            return
+
+        self.orders_table.setRowCount(len(orders))
+        for i, o in enumerate(orders):
+            self.orders_table.setItem(i, 0, QTableWidgetItem(str(o[0])))
+            self.orders_table.setItem(i, 1, QTableWidgetItem(str(o[1])))
+            self.orders_table.setItem(i, 2, QTableWidgetItem(str(o[2])))
+            self.orders_table.setItem(
+                i, 3,
+                QTableWidgetItem(f"{o[3]:.2f} ₽" if o[3] else "0.00 ₽")
+            )
+
+    def view_order_details(self):
+        row = self.orders_table.currentRow()
+        if row < 0:
+            QMessageBox.information(self, "Информация", "Выберите заказ в таблице.")
+            return
+        order_id = int(self.orders_table.item(row, 0).text())
+        details = self.db.get_order_details(order_id)
+        msg = f"<b>Состав заказа №{order_id}:</b><br><br>"
+        for d in details:
+            msg += (f"{d[1]} | {d[0]} ({d[2]}) - {d[3]} шт. x {d[4]:.2f} ₽ "
+                    f"= {d[5]:.2f} ₽<br>")
+        QMessageBox.information(self, "Детали заказа", msg)
+
+    def delete_selected_order(self):
+        row = self.orders_table.currentRow()
+        if row < 0:
+            QMessageBox.information(self, "Информация", "Выберите заказ в таблице.")
+            return
+        order_id = int(self.orders_table.item(row, 0).text())
+        reply = QMessageBox.question(
+            self, "Удаление",
+            f"Удалить заказ №{order_id}? Остатки будут возвращены на склад.",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply == QMessageBox.Yes and self.db.delete_order(order_id):
+            QMessageBox.information(self, "Успех", "Заказ удален")
+            self.load_orders()
+
+
+    def switch_page(self, index):
+        self.stacked.setCurrentIndex(index)
+        if hasattr(self, 'back_button'):
+            self.back_button.setVisible(index > 0)
+
+    def go_back(self):
+        """Возвращает на предыдущую страницу, если это возможно."""
+        current_index = self.stacked.currentIndex()
+        if current_index > 0:
+            self.switch_page(current_index - 1)
 
     def logout(self):
         if QMessageBox.question(self, "Выход", "Вы уверены?") == QMessageBox.Yes:
             self.close()
-            if self.login_window: self.login_window.show()
+            if self.login_window:
+                self.login_window.show()
 
 class LoginWindow(QWidget):
     def __init__(self, db):
